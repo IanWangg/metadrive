@@ -1,6 +1,4 @@
 import gymnasium as gym
-
-import gymnasium as gym
 from metadrive.envs import MetaDriveEnv
 
 import numpy as np
@@ -16,22 +14,49 @@ from wandb.integration.sb3 import WandbCallback
 from stable_baselines3.common.callbacks import CallbackList, CheckpointCallback, EvalCallback
 
 
-# model = PPO(config["policy_type"], config["env_id"], verbose=1, tensorboard_log=f"runs/{run.id}")
-# model.learn(
-#     total_timesteps=config["total_timesteps"],
-#     callback=WandbCallback(
-#         model_save_path=f"models/{run.id}",
-#         verbose=2,
-#     ),
-# )
-# run.finish()
+# stop logging
+import logging
+logger = logging.getLogger('MetaDrive')
+logger.propagate = False
 
-env_cfg = dict(
-    use_render=False,
-    start_seed=0, # must align with the seed in the argument of make_vec_env
-    num_scenarios=20,
-    horizon=1000,
+
+config = dict(
+    env = dict(
+        use_render=False,
+        start_seed=0, # must align with the seed in the argument of make_vec_env
+        num_scenarios=1000,
+        horizon=1000,
+        traffic_density=0.1,
+        random_traffic=False,
+    ),
+    algo = dict(
+        learning_rate=3e-4,
+        n_steps=128,
+        batch_size=256,
+        n_epochs=10,
+        vf_coef=1.0,
+        max_grad_norm=1.0,
+        verbose=1,
+        seed=0,
+        ent_coef=0.0,
+        tensorboard_log="./metadrive_ppo_tb_logs/",
+    ),
+    n_envs=256,
 )
+
+exptid = "original-metadrive-ppo-may04"
+
+# run = wandb.init(
+#         project="metaurban-rl",
+#         config=config,
+#         name="original-metadrive-ppo",
+#         group=exptid,
+#         save_code=True,  # optional
+#     )
+
+# wandb.init(project="metaurban-rl", name="original-metadrive-ppo")
+
+env_cfg = config["env"]
 
 def make_metadrive_env_fn():
     return MetaDriveEnv
@@ -44,54 +69,41 @@ def train():
         vec_env_cls=SubprocVecEnv, # must use SubprocVecEnv, otherwise the error will occur
         env_kwargs=dict(config=env_cfg),
         seed=0, # must pass seed to make_vec_env, otherwise the seed will be randomly generated, which will cause the error in metadrive
-        n_envs=2
+        n_envs=config["n_envs"] # seed 0 - 255
     )
 
     eval_env = make_vec_env(
         env_id=env_fn, 
         vec_env_cls=SubprocVecEnv, # must use SubprocVecEnv, otherwise the error will occur
         env_kwargs=dict(config=env_cfg),
-        seed=0, # must pass seed to make_vec_env, otherwise the seed will be randomly generated, which will cause the error in metadrive
-        n_envs=2
+        seed=250, # must pass seed to make_vec_env, otherwise the seed will be randomly generated, which will cause the error in metadrive
+        n_envs=16 # seed 250 - 255
     )
 
     model = PPO(
         "MlpPolicy", 
         env, 
-        learning_rate=1e-4,
-        n_steps=128,
-        batch_size=256,
-        n_epochs=4,
-        vf_coef=1.0,
-        max_grad_norm=1.0,
-        verbose=1,
-        seed=0,
-        ent_coef=0.001,
-        tensorboard_log="./tb_logs/",
+        **config["algo"],
     )
 
-    checkpoint_callback = checkpoint_callback = CheckpointCallback(
-        save_freq=100000,
-        save_path="./logs/",
-        name_prefix="regular_metadrive",
+    checkpoint_callback = CheckpointCallback(
+        save_freq=int(1e5),
+        save_path="./ckpt_logs/",
+        name_prefix=exptid,
         save_vecnormalize=True,
     )
 
-    eval_callback = EvalCallback(eval_env, best_model_save_path="./logs/",
-                             log_path="./logs/", eval_freq=500,
+    eval_callback = EvalCallback(eval_env, best_model_save_path="./eval_logs/",
+                             log_path="./eval_logs/", eval_freq=int(5e4),
                              deterministic=True, render=False)
     
-    run = wandb.init(
-        project="sb3",
-        sync_tensorboard=True,  # auto-upload sb3's tensorboard metrics
-        # monitor_gym=True,  # auto-upload the videos of agents playing the game
-        # save_code=True,  # optional
-    )
+    # wandb_callback = WandbCallback()
 
+    # callbacks = CallbackList([checkpoint_callback, eval_callback, wandb_callback])
     callbacks = CallbackList([checkpoint_callback, eval_callback])
 
     model.learn(
-        total_timesteps=1000,
+        total_timesteps=int(1e7),
         callback=callbacks,
     )
     env.close()

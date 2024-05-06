@@ -53,3 +53,8 @@
 /documentation/**/**.gif
 /documentation/source/img.png
 /documentation/source/demo.png
+
+/scripts/*logs/
+/scripts/*log/
+*log/
+*logs/
